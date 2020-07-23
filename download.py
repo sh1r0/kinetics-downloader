@@ -6,6 +6,8 @@ import subprocess
 import pytube
 from joblib import delayed
 from joblib import Parallel
+from pytube.exceptions import RegexMatchError
+from json.decoder import JSONDecodeError
 
 REQUIRED_COLUMNS = ['label', 'youtube_id', 'time_start', 'time_end', 'split', 'is_cc']
 TRIM_FORMAT = '%06d'
@@ -14,6 +16,7 @@ URL_BASE = 'https://www.youtube.com/watch?v='
 VIDEO_EXTENSION = '.mp4'
 VIDEO_FORMAT = 'mp4'
 TOTAL_VIDEOS = 0
+MAX_RETRIAL_TIMES = 3
 
 
 def create_file_structure(path, folders_names):
@@ -52,19 +55,19 @@ def download_clip(row, label_to_dir, trim, count):
     # don't download if already exists
     if not os.path.exists(os.path.join(output_path, filename + VIDEO_EXTENSION)):
         print('Start downloading: ', filename)
-        try:
-            pytube.YouTube(URL_BASE + filename).\
-                streams.filter(subtype=VIDEO_FORMAT).first().\
-                download(output_path, filename)
-            print('Finish downloading: ', filename)
-        except KeyError:
-            print('Unavailable video: ', filename)
+        for i in range(MAX_RETRIAL_TIMES):
+            try:
+                pytube.YouTube(URL_BASE + filename).\
+                    streams.filter(subtype=VIDEO_FORMAT).first().\
+                    download(output_path, filename)
+            except (KeyError, RegexMatchError, JSONDecodeError):
+                print(f'Retry #{i}: {filename}')
+            else:
+                print('Finish downloading: ', filename)
+                break
+        else:
+            print(f'Unavailable video: {filename}')
             return
-#         uncomment, if you want to skip any error:
-#
-#         except:
-#             print('Don\'t know why something went wrong(')
-#             return
     else:
         print('Already downloaded: ', filename)
 
@@ -141,6 +144,6 @@ if __name__ == '__main__':
     p.add_argument('--trim', action='store_true', dest='trim', default=False,
                    help='If specified, trims downloaded video, using values, provided in input_csv.\n'
                         'Requires "ffmpeg" installed and added to environment PATH')
-    p.add_argument('--num-jobs', type=int, default=1,
+    p.add_argument('-n', '--num-jobs', type=int, default=1,
                    help='Number of parallel processes for downloading and trimming.')
     main(**vars(p.parse_args()))
